@@ -38,6 +38,9 @@ Please choose one of the following three options:
 
 For a step-by-step walkthrough, see [How to Use](#how-to-use)
 
+* A larger screen is recommended for the best experience, such as a laptop, desktop, or iPad/tablet.
+
+
 ## What You Can Expect
 
 This dashboard helps users answer questions such as:
