@@ -18,7 +18,7 @@ const steps: DriveStep[] = [
     popover: {
       title: "Cross-filter exploration",
       description:
-        "Use the right-hand controls to build multi-select and cross-selected views. Organisation type, supply-chain role, and material choices can be combined, and the visualisations update dynamically as the selection changes.",
+        "Use the right-hand controls to build dynamic views. You can make multiple selections within each category (organisation type, supply-chain role, and material choices) and freely combine them, and the visualisations update dynamically as the selection changes.",
       side: "left",
       align: "start",
     },
@@ -28,7 +28,7 @@ const steps: DriveStep[] = [
     popover: {
       title: "Supply-chain coverage",
       description:
-        "Next, filter by supply-chain role. This shows how organisations are distributed across the power electronics value chain and lets you focus on roles such as device design, epiwafer, manufacturing, or end users.",
+        "This section shows how organisations are distributed from upstream to downstream and lets you focus on different roles. Use the right-side button to sort results.",
       side: "left",
       align: "start",
     },
@@ -38,7 +38,7 @@ const steps: DriveStep[] = [
     popover: {
       title: "Material intelligence",
       description:
-        "Add a material lens. Selecting SiC, GaN, Ga2O3, or other material categories cross-filters the current regional and supply-chain view.",
+        "Add a material lens. Selecting one or more material categories cross-filters the current regional and supply-chain view.",
       side: "left",
       align: "start",
     },
@@ -68,7 +68,7 @@ const steps: DriveStep[] = [
     popover: {
       title: "AI and data capsule",
       description:
-        "Use this capsule to call Ask AI for analysis of the current view, import or restore spreadsheet data sources, clear filters, download the source data, or restart this guided briefing.",
+        "Use this capsule to call AI for analysis of the current view, import or restore spreadsheet data sources, clear filters, download the source data, or restart this guided briefing.",
       side: "top",
       align: "end",
     },

@@ -13,6 +13,10 @@ import {
   buildRewireAgentViewContext,
 } from "@/lib/rewire-agent/view-context";
 import {
+  extractTrailingRewireToolCallXml,
+  parseRewireAgentToolCallXml,
+} from "@/lib/rewire-agent/tool-call-fallback";
+import {
   deleteRewireAgentSession,
   loadRewireAgentSession,
   saveRewireAgentSession,
@@ -21,9 +25,11 @@ import type {
   RewireAgentIntent,
   RewireAgentToolName,
   RewireAgentUIMessage,
+  RewireAgentViewContext,
 } from "@/lib/rewire-agent/types";
 
 const maxEmptyToolRetries = 1;
+const maxMalformedToolRetries = 1;
 
 function debugRewireAgent(message: string, data?: unknown) {
   if (process.env.NODE_ENV === "production") {
@@ -89,6 +95,132 @@ function isEmptyAssistantResponse(message: RewireAgentUIMessage | undefined) {
   );
 }
 
+function fallbackToolCallId() {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return `rewire-fallback-${crypto.randomUUID()}`;
+  }
+
+  return `rewire-fallback-${Date.now().toString(36)}`;
+}
+
+function replaceMessageById(
+  currentMessages: RewireAgentUIMessage[],
+  fallbackMessages: RewireAgentUIMessage[],
+  messageId: string,
+  nextMessage: RewireAgentUIMessage,
+) {
+  const source = currentMessages.some((message) => message.id === messageId)
+    ? currentMessages
+    : fallbackMessages;
+
+  return source.map((message) =>
+    message.id === messageId ? nextMessage : message,
+  );
+}
+
+function recoverLeakedToolCall({
+  message,
+  context,
+}: {
+  message: RewireAgentUIMessage;
+  context: RewireAgentViewContext;
+}):
+  | {
+      kind: "none";
+    }
+  | {
+      kind: "parsed";
+      source: "text" | "reasoning";
+      message: RewireAgentUIMessage;
+      toolCallId: string;
+      toolName: RewireAgentToolName;
+    }
+  | {
+      kind: "parse-error";
+      source: "text" | "reasoning";
+      message: RewireAgentUIMessage;
+      errorText: string;
+      rawXmlLength: number;
+    } {
+  if (message.role !== "assistant" || hasToolPart(message)) {
+    return { kind: "none" };
+  }
+
+  for (let partIndex = message.parts.length - 1; partIndex >= 0; partIndex -= 1) {
+    const part = message.parts[partIndex];
+
+    if (part.type !== "text" && part.type !== "reasoning") {
+      continue;
+    }
+
+    const leakedToolCall = extractTrailingRewireToolCallXml(part.text);
+
+    if (!leakedToolCall) {
+      continue;
+    }
+
+    const sanitizedParts: RewireAgentUIMessage["parts"] =
+      message.parts.flatMap((candidate, index) => {
+        if (index !== partIndex) {
+          return [candidate];
+        }
+
+        if (!leakedToolCall.visibleText.trim()) {
+          return [];
+        }
+
+        return [
+          {
+            ...part,
+            text: leakedToolCall.visibleText,
+            state: "done" as const,
+          },
+        ];
+      });
+    const sanitizedMessage: RewireAgentUIMessage = {
+      ...message,
+      parts: sanitizedParts,
+    };
+
+    try {
+      const parsed = parseRewireAgentToolCallXml(leakedToolCall.rawXml);
+      const toolCallId = fallbackToolCallId();
+      const toolPart = {
+        type: `tool-${parsed.toolName}`,
+        toolCallId,
+        state: "output-available",
+        input: parsed.input,
+        output: buildRewireAgentToolOutput({
+          toolName: parsed.toolName,
+          input: parsed.input,
+          context,
+        }),
+      } as RewireAgentUIMessage["parts"][number];
+
+      return {
+        kind: "parsed",
+        source: part.type,
+        message: {
+          ...sanitizedMessage,
+          parts: [...sanitizedMessage.parts, toolPart],
+        },
+        toolCallId,
+        toolName: parsed.toolName,
+      };
+    } catch (error) {
+      return {
+        kind: "parse-error",
+        source: part.type,
+        message: sanitizedMessage,
+        errorText: errorText(error),
+        rawXmlLength: leakedToolCall.rawXml.length,
+      };
+    }
+  }
+
+  return { kind: "none" };
+}
+
 export function useRewireAgent({
   metrics,
   sourceName,
@@ -119,7 +251,10 @@ export function useRewireAgent({
   const finalizeRef = useRef(false);
   const pendingAutoContinueRef = useRef(false);
   const pendingEmptyToolRetryRef = useRef(false);
+  const pendingMalformedToolRetryRef = useRef(false);
   const emptyToolRetryCountRef = useRef(0);
+  const malformedToolRetryCountRef = useRef(0);
+  const malformedToolRetryMessageIdRef = useRef<string | null>(null);
   const toolCallsThisTurnRef = useRef(0);
   const turnIdRef = useRef(0);
   const skipNextSaveRef = useRef(false);
@@ -257,7 +392,7 @@ export function useRewireAgent({
           });
       }, 0);
     },
-    onFinish({ finishReason, message }) {
+    onFinish({ finishReason, message, messages: finishedMessages }) {
       debugRewireAgent("stream finished", {
         finishReason,
         messageParts: message.parts.map((part) => part.type),
@@ -267,6 +402,65 @@ export function useRewireAgent({
 
       if (finishReason === "tool-calls") {
         return;
+      }
+
+      const leakedToolCall = recoverLeakedToolCall({
+        message,
+        context: viewContextRef.current,
+      });
+
+      if (leakedToolCall.kind === "parsed") {
+        setMessages((currentMessages) =>
+          replaceMessageById(
+            currentMessages,
+            finishedMessages,
+            message.id,
+            leakedToolCall.message,
+          ),
+        );
+        finalizeRef.current = true;
+        pendingAutoContinueRef.current = true;
+        pendingEmptyToolRetryRef.current = false;
+        pendingMalformedToolRetryRef.current = false;
+        emptyToolRetryCountRef.current = 0;
+        malformedToolRetryCountRef.current = 0;
+        toolCallsThisTurnRef.current = 1;
+        debugRewireAgent("recovered leaked XML tool call", {
+          source: leakedToolCall.source,
+          toolCallId: leakedToolCall.toolCallId,
+          toolName: leakedToolCall.toolName,
+        });
+        return;
+      }
+
+      if (leakedToolCall.kind === "parse-error") {
+        setMessages((currentMessages) =>
+          replaceMessageById(
+            currentMessages,
+            finishedMessages,
+            message.id,
+            leakedToolCall.message,
+          ),
+        );
+
+        if (malformedToolRetryCountRef.current < maxMalformedToolRetries) {
+          pendingMalformedToolRetryRef.current = true;
+          malformedToolRetryMessageIdRef.current = message.id;
+          debugRewireAgent("scheduled malformed XML tool-call retry", {
+            source: leakedToolCall.source,
+            errorText: leakedToolCall.errorText,
+            rawXmlLength: leakedToolCall.rawXmlLength,
+            retry: malformedToolRetryCountRef.current + 1,
+            maxRetries: maxMalformedToolRetries,
+          });
+          return;
+        }
+
+        debugRewireAgent("ignored malformed XML tool call after retries", {
+          source: leakedToolCall.source,
+          errorText: leakedToolCall.errorText,
+          rawXmlLength: leakedToolCall.rawXmlLength,
+        });
       }
 
       if (
@@ -286,8 +480,11 @@ export function useRewireAgent({
 
       finalizeRef.current = false;
       pendingAutoContinueRef.current = false;
+      pendingMalformedToolRetryRef.current = false;
+      malformedToolRetryMessageIdRef.current = null;
       toolCallsThisTurnRef.current = 0;
       emptyToolRetryCountRef.current = 0;
+      malformedToolRetryCountRef.current = 0;
       currentIntentRef.current = "custom";
     },
   });
@@ -356,7 +553,10 @@ export function useRewireAgent({
       finalizeRef.current = false;
       pendingAutoContinueRef.current = false;
       pendingEmptyToolRetryRef.current = false;
+      pendingMalformedToolRetryRef.current = false;
       emptyToolRetryCountRef.current = 0;
+      malformedToolRetryCountRef.current = 0;
+      malformedToolRetryMessageIdRef.current = null;
       toolCallsThisTurnRef.current = 0;
       debugRewireAgent("sending user message", {
         intent,
@@ -391,7 +591,10 @@ export function useRewireAgent({
     finalizeRef.current = false;
     pendingAutoContinueRef.current = false;
     pendingEmptyToolRetryRef.current = false;
+    pendingMalformedToolRetryRef.current = false;
     emptyToolRetryCountRef.current = 0;
+    malformedToolRetryCountRef.current = 0;
+    malformedToolRetryMessageIdRef.current = null;
     toolCallsThisTurnRef.current = 0;
     debugRewireAgent("regenerating message", {
       sessionId,
@@ -411,7 +614,10 @@ export function useRewireAgent({
     turnIdRef.current += 1;
     pendingAutoContinueRef.current = false;
     pendingEmptyToolRetryRef.current = false;
+    pendingMalformedToolRetryRef.current = false;
     emptyToolRetryCountRef.current = 0;
+    malformedToolRetryCountRef.current = 0;
+    malformedToolRetryMessageIdRef.current = null;
     finalizeRef.current = false;
     toolCallsThisTurnRef.current = 0;
     currentIntentRef.current = "custom";
@@ -433,7 +639,10 @@ export function useRewireAgent({
     finalizeRef.current = false;
     pendingAutoContinueRef.current = false;
     pendingEmptyToolRetryRef.current = false;
+    pendingMalformedToolRetryRef.current = false;
     emptyToolRetryCountRef.current = 0;
+    malformedToolRetryCountRef.current = 0;
+    malformedToolRetryMessageIdRef.current = null;
     toolCallsThisTurnRef.current = 0;
     currentIntentRef.current = "custom";
     skipNextSaveRef.current = true;
@@ -463,9 +672,33 @@ export function useRewireAgent({
   }, [sendMessage, sessionId, status]);
 
   useEffect(() => {
+    if (status !== "ready" || !pendingMalformedToolRetryRef.current) {
+      return;
+    }
+
+    pendingMalformedToolRetryRef.current = false;
+    malformedToolRetryCountRef.current += 1;
+    debugRewireAgent("retrying malformed XML tool-call response", {
+      intent: currentIntentRef.current,
+      retry: malformedToolRetryCountRef.current,
+    });
+
+    void regenerate({
+      messageId: malformedToolRetryMessageIdRef.current ?? undefined,
+      body: {
+        sessionId,
+        intent: currentIntentRef.current,
+        finalize: false,
+        toolCallFallbackRetry: true,
+      },
+    });
+  }, [regenerate, sessionId, status]);
+
+  useEffect(() => {
     if (status === "error") {
       pendingAutoContinueRef.current = false;
       pendingEmptyToolRetryRef.current = false;
+      pendingMalformedToolRetryRef.current = false;
     }
   }, [status]);
 

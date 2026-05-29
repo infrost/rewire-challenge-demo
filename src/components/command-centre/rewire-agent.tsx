@@ -13,6 +13,7 @@ import remarkGfm from "remark-gfm";
 import {
   Bot,
   Brain,
+  Info,
   Loader2,
   RotateCcw,
   SendHorizontal,
@@ -64,15 +65,6 @@ function getMessageText(message: RewireAgentUIMessage) {
     .join("");
 }
 
-function getReasoningParts(message: RewireAgentUIMessage) {
-  return message.parts.filter(
-    (
-      part,
-    ): part is Extract<(typeof message.parts)[number], { type: "reasoning" }> =>
-      part.type === "reasoning",
-  );
-}
-
 function isToolPart(
   part: RewireAgentUIMessage["parts"][number],
 ): part is Extract<
@@ -84,8 +76,8 @@ function isToolPart(
 
 function toolLabel(type: string) {
   return type === "tool-rewire_summarize_insights"
-    ? "Insight context"
-    : "View context";
+    ? "Model viewed insights"
+    : "Model viewed context";
 }
 
 function ToolStatus({
@@ -130,34 +122,32 @@ function ToolStatus({
   );
 }
 
-function ReasoningPanel({
-  parts,
-}: {
-  parts: Extract<RewireAgentUIMessage["parts"][number], { type: "reasoning" }>[];
-}) {
-  const text = parts
-    .map((part) => part.text)
-    .join("\n")
-    .trim();
-  const streaming = parts.some((part) => part.state === "streaming");
-
+function ThinkingIndicator() {
   return (
-    <details className="rounded-md bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
-      <summary className="flex cursor-pointer items-center gap-2 font-medium text-foreground">
-        {streaming ? (
-          <Loader2 aria-hidden="true" className="animate-spin" />
-        ) : (
-          <Brain aria-hidden="true" />
-        )}
-        Reasoning
-        <span className="font-normal text-muted-foreground">
-          {streaming ? "streaming" : "complete"}
-        </span>
-      </summary>
-      <p className="mt-2 whitespace-pre-wrap">
-        {text || "Waiting for reasoning tokens..."}
-      </p>
-    </details>
+    <div className="flex justify-start">
+      <div className="flex items-center gap-2 rounded-lg border bg-background px-3 py-2 text-sm text-muted-foreground">
+        <Loader2 aria-hidden="true" className="animate-spin" />
+        Thinking
+      </div>
+    </div>
+  );
+}
+
+function AnswerNotice() {
+  return (
+    <span className="group relative inline-flex">
+      <span
+        tabIndex={0}
+        aria-label="AI answer note"
+        className="inline-flex cursor-help items-center rounded-full text-muted-foreground outline-none transition hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 [&_svg]:size-3.5"
+      >
+        <Info aria-hidden="true" />
+      </span>
+      <span className="pointer-events-none absolute right-0 bottom-full mb-2 hidden w-60 rounded-md border bg-popover px-3 py-2 text-xs leading-5 text-popover-foreground shadow-lg group-hover:block group-focus-within:block">
+        AI may generate unexpected content. If something looks off, use the
+        refresh icon above to retry.
+      </span>
+    </span>
   );
 }
 
@@ -236,7 +226,6 @@ function MarkdownText({ text }: { text: string }) {
 
 function MessageBubble({ message }: { message: RewireAgentUIMessage }) {
   const text = getMessageText(message);
-  const reasoningParts = getReasoningParts(message);
   const toolParts = message.parts.filter(isToolPart);
   const isUser = message.role === "user";
 
@@ -250,10 +239,6 @@ function MessageBubble({ message }: { message: RewireAgentUIMessage }) {
             : "border bg-background text-foreground",
         )}
       >
-        {reasoningParts.length > 0 && !isUser ? (
-          <ReasoningPanel parts={reasoningParts} />
-        ) : null}
-
         {toolParts.map((part) => (
           <ToolStatus key={part.toolCallId} part={part} />
         ))}
@@ -492,7 +477,7 @@ export function RewireAgent({
                 </div>
               </header>
 
-              <div className="min-h-0 flex-1 overscroll-contain overflow-y-auto bg-muted/20 px-4 py-4">
+              <div className="relative min-h-0 flex-1 overscroll-contain overflow-y-auto bg-muted/20 px-4 py-4">
                 <div className="grid gap-4">
                   {error ? (
                     <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
@@ -518,17 +503,15 @@ export function RewireAgent({
                     <MessageBubble key={message.id} message={message} />
                   ))}
 
-                  {isBusy ? (
-                    <div className="flex justify-start">
-                      <div className="flex items-center gap-2 rounded-lg border bg-background px-3 py-2 text-sm text-muted-foreground">
-                        <Loader2 aria-hidden="true" className="animate-spin" />
-                        Thinking
-                      </div>
-                    </div>
-                  ) : null}
+                  {isBusy ? <ThinkingIndicator /> : null}
 
                   <div ref={bottomRef} />
                 </div>
+                {messages.some((message) => message.role === "assistant") ? (
+                  <div className="sticky right-0 bottom-0 ml-auto flex w-fit justify-end pt-2">
+                    <AnswerNotice />
+                  </div>
+                ) : null}
               </div>
             </section>
           ) : null}

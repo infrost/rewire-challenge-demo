@@ -16,8 +16,10 @@ import {
 const twoColumnQuery = "(min-width: 1120px)";
 
 export function TwoColumnLayoutWarning({
+  onFinished,
   onScaleDown,
 }: {
+  onFinished: () => void;
   onScaleDown: () => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -38,19 +40,32 @@ export function TwoColumnLayoutWarning({
     };
   }, [dismissed]);
 
-  function scaleAppDown() {
-    onScaleDown();
+  function finishWarning() {
     setDismissed(true);
     setOpen(false);
+    onFinished();
+  }
+
+  function scaleAppDown() {
+    onScaleDown();
+    finishWarning();
+  }
+
+  function handleOpenChange(nextOpen: boolean) {
+    if (!nextOpen && open) {
+      finishWarning();
+      return;
+    }
+
+    setOpen(nextOpen);
   }
 
   function dismissWarning() {
-    setDismissed(true);
-    setOpen(false);
+    finishWarning();
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Best on a bigger screen</DialogTitle>

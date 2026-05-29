@@ -78,9 +78,11 @@ function debugRewireAgentRoute(message: string, data?: unknown) {
 function buildSystemPrompt({
   intent,
   finalize,
+  toolCallFallbackRetry,
 }: {
   intent: RewireAgentIntent;
   finalize: boolean;
+  toolCallFallbackRetry: boolean;
 }) {
   return [
     "You are the REWIRE ecosystem intelligence assistant.",
@@ -97,6 +99,10 @@ function buildSystemPrompt({
     "For Explain Current Selection, call rewire_explain_view before answering.",
     "For Summarize Important Insights, call rewire_summarize_insights before answering.",
     "For free-form questions, call a REWIRE tool only if current view evidence would improve the answer.",
+    "Use native tool calls only. Never write XML tool calls or raw tool arguments in visible text or reasoning.",
+    toolCallFallbackRetry
+      ? "Retry note: the previous response leaked or malformed a tool call. If a tool is needed, emit exactly one native REWIRE tool call now."
+      : "",
     "",
     finalize
       ? "Finalization mode is active. Do not call tools; answer using the completed tool output already in the conversation."
@@ -124,12 +130,14 @@ export async function POST(request: Request) {
     messages?: unknown;
     intent?: unknown;
     finalize?: unknown;
+    toolCallFallbackRetry?: unknown;
   };
   const messages = Array.isArray(body.messages)
     ? (body.messages as RewireAgentUIMessage[])
     : [];
   const intent = resolveIntent(body.intent);
   const finalize = body.finalize === true;
+  const toolCallFallbackRetry = body.toolCallFallbackRetry === true;
   const modelId =
     getEnv("REWIRE_AGENT_MODEL") || getEnv("OPENAI_MODEL") || defaultModel;
   const baseURL = getEnv("OPENAI_API_BASE") || getEnv("OPENAI_BASE_URL");
@@ -141,11 +149,16 @@ export async function POST(request: Request) {
     tools: rewireAgentTools,
   });
   const activeTools = finalize ? undefined : toolsForIntent(intent);
-  const system = buildSystemPrompt({ intent, finalize });
+  const system = buildSystemPrompt({
+    intent,
+    finalize,
+    toolCallFallbackRetry,
+  });
 
   debugRewireAgentRoute("request", {
     intent,
     finalize,
+    toolCallFallbackRetry,
     modelId,
     hasBaseURL: Boolean(baseURL),
     activeTools: activeTools ? Object.keys(activeTools) : [],

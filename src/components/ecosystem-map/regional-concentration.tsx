@@ -107,6 +107,7 @@ export function RegionalConcentration({
   activeClusterId,
   totalCount,
   globalTypeCounts,
+  contextLabel,
   onClusterSelect,
   onGlobalSelect,
 }: {
@@ -114,18 +115,40 @@ export function RegionalConcentration({
   activeClusterId: string | null;
   totalCount: number;
   globalTypeCounts: Record<OrganisationType, number>;
+  contextLabel?: string | null;
   onClusterSelect: (cluster: MapCluster) => void;
   onGlobalSelect: () => void;
 }) {
   const isGlobalActive = activeClusterId === null;
+  const hasFilterContext = Boolean(contextLabel);
 
   return (
     <div className="grid gap-2">
       <div className="flex items-center justify-between gap-2">
-        <p className="text-sm font-semibold text-foreground">
-          Regional concentration
+        <div className="min-w-0">
+          <p
+            className="truncate text-sm font-semibold text-foreground"
+            title={
+              hasFilterContext && contextLabel
+                ? `Current regional distribution: ${contextLabel}`
+                : undefined
+            }
+          >
+            {hasFilterContext && contextLabel ? (
+              <>
+                Current regional distribution:{" "}
+                <span className="font-normal text-muted-foreground">
+                  {contextLabel}
+                </span>
+              </>
+            ) : (
+              "Regional concentration"
+            )}
+          </p>
+        </div>
+        <p className="shrink-0 text-xs text-muted-foreground">
+          Sorted by parsed records
         </p>
-        <p className="text-xs text-muted-foreground">Sorted by parsed records</p>
       </div>
 
       {/* All-region pseudo-row */}

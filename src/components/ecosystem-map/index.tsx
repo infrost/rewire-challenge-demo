@@ -100,7 +100,7 @@ export function EcosystemMap({
       data-tour="ecosystem-map"
     >
       <CardContent className="grid min-h-0 flex-1 grid-rows-[minmax(340px,1fr)_minmax(200px,0.5fr)] p-0">
-        <div className="grid min-h-0 overflow-hidden lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.36fr)]">
+        <div className="grid min-h-0 grid-cols-[minmax(0,1fr)_minmax(320px,0.36fr)] overflow-hidden">
           <div className="min-h-[330px] bg-card p-3 lg:pr-0 lg:min-h-0">
             <div className="relative h-full min-h-[314px] overflow-hidden rounded-lg bg-muted ring-1 ring-border lg:min-h-0">
               <div className="absolute inset-0">
@@ -157,6 +157,7 @@ export function EcosystemMap({
               activeClusterId={activeClusterId}
               totalCount={organisations}
               globalTypeCounts={globalTypeCounts}
+              contextLabel={filterTags.length ? resultContextLabel : null}
               onClusterSelect={focusCluster}
               onGlobalSelect={() => {
                 setActiveClusterId(null);

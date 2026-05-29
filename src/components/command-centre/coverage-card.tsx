@@ -1,5 +1,6 @@
-import { Layers3, Network } from "lucide-react";
+import { ArrowDownWideNarrow } from "lucide-react";
 
+import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -22,17 +23,53 @@ export type MaterialCoverageItem = CoverageItem<MaterialCategory> & {
   typeCounts: Record<OrganisationType, number>;
 };
 
+export type CoverageSortMode = "default" | "count";
+
+function CoverageSortButton({
+  sortMode,
+  itemLabel,
+  onToggle,
+}: {
+  sortMode: CoverageSortMode;
+  itemLabel: string;
+  onToggle: () => void;
+}) {
+  const sorted = sortMode === "count";
+  const label = sorted
+    ? `Show default ${itemLabel} order`
+    : `Sort ${itemLabel} by total count`;
+
+  return (
+    <Button
+      type="button"
+      variant={sorted ? "secondary" : "ghost"}
+      size="icon-sm"
+      className={sorted ? undefined : "text-muted-foreground"}
+      aria-label={label}
+      aria-pressed={sorted}
+      title={label}
+      onClick={onToggle}
+    >
+      <ArrowDownWideNarrow aria-hidden="true" data-icon="inline-start" />
+    </Button>
+  );
+}
+
 export function SupplyChainCoverageCard({
   roles,
   visibleTypes,
   selectedKeys,
   contextLabel,
+  sortMode,
+  onSortModeToggle,
   onRoleToggle,
 }: {
   roles: SupplyChainCoverageItem[];
   visibleTypes: OrganisationType[];
   selectedKeys: SupplyChainRole[];
   contextLabel?: string | null;
+  sortMode: CoverageSortMode;
+  onSortModeToggle: () => void;
   onRoleToggle: (item: CoverageItem<SupplyChainRole>) => void;
 }) {
   return (
@@ -45,7 +82,11 @@ export function SupplyChainCoverageCard({
             </p>
             <CardTitle className="mt-1">How the ecosystem is structured</CardTitle>
           </div>
-          <Network aria-hidden="true" className="text-muted-foreground" size={24} />
+          <CoverageSortButton
+            sortMode={sortMode}
+            itemLabel="supply-chain"
+            onToggle={onSortModeToggle}
+          />
         </div>
       </CardHeader>
       <CardContent className="grid gap-2">
@@ -68,12 +109,16 @@ export function MaterialCoverageCard({
   visibleTypes,
   selectedKeys,
   contextLabel,
+  sortMode,
+  onSortModeToggle,
   onMaterialToggle,
 }: {
   materials: MaterialCoverageItem[];
   visibleTypes: OrganisationType[];
   selectedKeys: MaterialCategory[];
   contextLabel?: string | null;
+  sortMode: CoverageSortMode;
+  onSortModeToggle: () => void;
   onMaterialToggle: (item: CoverageItem<MaterialCategory>) => void;
 }) {
   return (
@@ -88,7 +133,11 @@ export function MaterialCoverageCard({
               What technologies the landscape is built around
             </CardTitle>
           </div>
-          <Layers3 aria-hidden="true" className="text-muted-foreground" size={24} />
+          <CoverageSortButton
+            sortMode={sortMode}
+            itemLabel="material"
+            onToggle={onSortModeToggle}
+          />
         </div>
       </CardHeader>
       <CardContent>

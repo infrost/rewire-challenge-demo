@@ -9,6 +9,7 @@ import { Card } from "@/components/ui/card";
 import {
   MaterialCoverageCard,
   SupplyChainCoverageCard,
+  type CoverageSortMode,
   type MaterialCoverageItem,
   type SupplyChainCoverageItem,
 } from "@/components/command-centre/coverage-card";
@@ -58,6 +59,7 @@ const regionLabelMap: Record<MapRegion, string> = {
 };
 
 const guidedBriefingStorageKey = "rewire-guided-briefing-seen";
+const guidedBriefingMinWidthQuery = "(min-width: 1120px)";
 const compactAppScale = 0.85;
 
 const compactAppScaleStyle: CSSProperties = {
@@ -160,10 +162,15 @@ export function EcosystemCommandCentre({
   initialMetrics: LandscapeMetrics;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const briefingTimerRef = useRef<number | null>(null);
   const [metrics, setMetrics] = useState(initialMetrics);
   const [sourceName, setSourceName] = useState("Default REWIRE spreadsheet");
   const [activeFilter, setActiveFilter] = useState<OrganisationResultFilter>({});
   const [activeRegion, setActiveRegion] = useState<MapRegion | null>(null);
+  const [supplyChainSortMode, setSupplyChainSortMode] =
+    useState<CoverageSortMode>("default");
+  const [materialSortMode, setMaterialSortMode] =
+    useState<CoverageSortMode>("default");
   const [resultsDialogOpen, setResultsDialogOpen] = useState(false);
   const [heuristicDialogOpen, setHeuristicDialogOpen] = useState(false);
   const [heuristicDialogFilter, setHeuristicDialogFilter] =
@@ -274,42 +281,47 @@ export function EcosystemCommandCentre({
 
   const regionRoles = useMemo<SupplyChainCoverageItem[]>(() => {
     const total = roleCoverageOrganisations.length || 1;
-    return [...supplyChainRoles]
-      .map((key) => {
-        const typeCounts = countCoverageByType(
-          roleCoverageOrganisations,
-          (org) => org.supplyChainRoles.includes(key),
-        );
-        const count = totalTypeCounts(typeCounts);
+    const items = [...supplyChainRoles].map((key) => {
+      const typeCounts = countCoverageByType(
+        roleCoverageOrganisations,
+        (org) => org.supplyChainRoles.includes(key),
+      );
+      const count = totalTypeCounts(typeCounts);
 
-        return {
-          key,
-          count,
-          share: Math.round((count / total) * 100),
-          typeCounts,
-        };
-      });
-  }, [roleCoverageOrganisations]);
+      return {
+        key,
+        count,
+        share: Math.round((count / total) * 100),
+        typeCounts,
+      };
+    });
+
+    return supplyChainSortMode === "count"
+      ? [...items].sort((a, b) => b.count - a.count)
+      : items;
+  }, [roleCoverageOrganisations, supplyChainSortMode]);
 
   const regionMaterials = useMemo<MaterialCoverageItem[]>(() => {
     const total = materialCoverageOrganisations.length || 1;
-    return [...materialCategories]
-      .map((key) => {
-        const typeCounts = countCoverageByType(
-          materialCoverageOrganisations,
-          (org) => org.materials.includes(key),
-        );
-        const count = totalTypeCounts(typeCounts);
+    const items = [...materialCategories].map((key) => {
+      const typeCounts = countCoverageByType(
+        materialCoverageOrganisations,
+        (org) => org.materials.includes(key),
+      );
+      const count = totalTypeCounts(typeCounts);
 
-        return {
-          key,
-          count,
-          share: Math.round((count / total) * 100),
-          typeCounts,
-        };
-      })
-      .sort((a, b) => b.count - a.count);
-  }, [materialCoverageOrganisations]);
+      return {
+        key,
+        count,
+        share: Math.round((count / total) * 100),
+        typeCounts,
+      };
+    });
+
+    return materialSortMode === "count"
+      ? [...items].sort((a, b) => b.count - a.count)
+      : items;
+  }, [materialCoverageOrganisations, materialSortMode]);
 
   const topOrganisations = useMemo(
     () =>
@@ -358,6 +370,18 @@ export function EcosystemCommandCentre({
     );
   }
 
+  function toggleSupplyChainSortMode() {
+    setSupplyChainSortMode((current) =>
+      current === "default" ? "count" : "default",
+    );
+  }
+
+  function toggleMaterialSortMode() {
+    setMaterialSortMode((current) =>
+      current === "default" ? "count" : "default",
+    );
+  }
+
   function toggleOrganisationType(type: OrganisationType) {
     updateFilter((current) =>
       toggleResultFilterValue(current, "organisationTypes", type),
@@ -401,6 +425,23 @@ export function EcosystemCommandCentre({
 
   function toggleViewScale() {
     setAppScale((current) => (current < 1 ? 1 : compactAppScale));
+  }
+
+  function scheduleGuidedBriefing(delay = 800) {
+    if (window.localStorage.getItem(guidedBriefingStorageKey) === "true") {
+      return;
+    }
+
+    window.localStorage.setItem(guidedBriefingStorageKey, "true");
+
+    if (briefingTimerRef.current !== null) {
+      window.clearTimeout(briefingTimerRef.current);
+    }
+
+    briefingTimerRef.current = window.setTimeout(() => {
+      void startGuidedBriefing();
+      briefingTimerRef.current = null;
+    }, delay);
   }
 
   async function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
@@ -461,13 +502,27 @@ export function EcosystemCommandCentre({
       return;
     }
 
-    window.localStorage.setItem(guidedBriefingStorageKey, "true");
-    const briefingTimer = window.setTimeout(() => {
-      void startGuidedBriefing();
-    }, 800);
+    const mediaQuery = window.matchMedia(guidedBriefingMinWidthQuery);
+    function startWhenReady() {
+      if (
+        !mediaQuery.matches ||
+        window.localStorage.getItem(guidedBriefingStorageKey) === "true"
+      ) {
+        return;
+      }
+
+      scheduleGuidedBriefing();
+    }
+
+    startWhenReady();
+    mediaQuery.addEventListener("change", startWhenReady);
 
     return () => {
-      window.clearTimeout(briefingTimer);
+      if (briefingTimerRef.current !== null) {
+        window.clearTimeout(briefingTimerRef.current);
+        briefingTimerRef.current = null;
+      }
+      mediaQuery.removeEventListener("change", startWhenReady);
     };
   }, []);
 
@@ -486,7 +541,7 @@ export function EcosystemCommandCentre({
         <section
           className="mx-auto grid w-full max-w-[1800px] items-start gap-3 px-3 py-3 sm:px-4 md:px-5"
           style={{
-            gridTemplateColumns: "minmax(680px, 1.15fr) minmax(360px, 0.85fr)",
+            gridTemplateColumns: "minmax(480px, 1.15fr) minmax(320px, 0.85fr)",
           }}
         >
           <aside className="sticky top-4 h-[calc(100vh-2rem)] min-h-0">
@@ -578,6 +633,8 @@ export function EcosystemCommandCentre({
                 visibleTypes={visibleCoverageTypes}
                 selectedKeys={activeFilter.supplyChainRoles ?? []}
                 contextLabel={coverageContextLabel}
+                sortMode={supplyChainSortMode}
+                onSortModeToggle={toggleSupplyChainSortMode}
                 onRoleToggle={toggleRole}
               />
               <MaterialCoverageCard
@@ -585,6 +642,8 @@ export function EcosystemCommandCentre({
                 visibleTypes={visibleCoverageTypes}
                 selectedKeys={activeFilter.materials ?? []}
                 contextLabel={coverageContextLabel}
+                sortMode={materialSortMode}
+                onSortModeToggle={toggleMaterialSortMode}
                 onMaterialToggle={toggleMaterial}
               />
             </section>
@@ -652,7 +711,10 @@ export function EcosystemCommandCentre({
           activeRegion={activeRegion}
         />
       </FloatingSpreadsheetControls>
-      <TwoColumnLayoutWarning onScaleDown={scaleAppDown} />
+      <TwoColumnLayoutWarning
+        onFinished={() => scheduleGuidedBriefing(700)}
+        onScaleDown={scaleAppDown}
+      />
     </main>
   );
 }
